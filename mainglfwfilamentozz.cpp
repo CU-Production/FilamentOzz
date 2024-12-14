@@ -169,9 +169,9 @@ int main()
             v->position[0] = positions[i * 3 + 0];
             v->position[1] = positions[i * 3 + 1];
             v->position[2] = positions[i * 3 + 2];
-            v->normal[0] = normals[i * 3 + 0] * 0.5f + 0.5f;
-            v->normal[1] = normals[i * 3 + 1] * 0.5f + 0.5f;
-            v->normal[2] = normals[i * 3 + 2] * 0.5f + 0.5f;
+            v->normal[0] = normals[i * 3 + 0];
+            v->normal[1] = normals[i * 3 + 1];
+            v->normal[2] = normals[i * 3 + 2];
             v->joint_indices[0] = joint_indices[i * 4 + 0];
             v->joint_indices[1] = joint_indices[i * 4 + 1];
             v->joint_indices[2] = joint_indices[i * 4 + 2];
