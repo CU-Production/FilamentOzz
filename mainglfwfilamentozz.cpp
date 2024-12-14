@@ -36,6 +36,8 @@
 
 #include "HandmadeMath.h"
 
+#include <cmath>
+
 /**
  * matc -o bakedColor.filament -a all bakedColor.mat
  * bin2header.exe -o bakedColor.filament.h bakedColor.filament
@@ -167,9 +169,9 @@ int main()
             v->position[0] = positions[i * 3 + 0];
             v->position[1] = positions[i * 3 + 1];
             v->position[2] = positions[i * 3 + 2];
-            v->normal[0] = normals[i * 3 + 0];
-            v->normal[1] = normals[i * 3 + 1];
-            v->normal[2] = normals[i * 3 + 2];
+            v->normal[0] = normals[i * 3 + 0] * 0.5f + 0.5f;
+            v->normal[1] = normals[i * 3 + 1] * 0.5f + 0.5f;
+            v->normal[2] = normals[i * 3 + 2] * 0.5f + 0.5f;
             v->joint_indices[0] = joint_indices[i * 4 + 0];
             v->joint_indices[1] = joint_indices[i * 4 + 1];
             v->joint_indices[2] = joint_indices[i * 4 + 2];
@@ -178,10 +180,10 @@ int main()
             const float jw1 = joint_weights[i * 3 + 1];
             const float jw2 = joint_weights[i * 3 + 2];
             const float jw3 = 1.0f - (jw0 + jw1 + jw2);
-            v->joint_weights[0] = jw0;
-            v->joint_weights[1] = jw1;
-            v->joint_weights[2] = jw2;
-            v->joint_weights[3] = jw3;
+            v->joint_weights[0] = std::max(jw0, 0.0f);
+            v->joint_weights[1] = std::max(jw1, 0.0f);
+            v->joint_weights[2] = std::max(jw2, 0.0f);
+            v->joint_weights[3] = std::max(jw3, 0.0f);
         }
 
         indices.resize(num_triangle_indices);
@@ -216,6 +218,8 @@ int main()
             .build(*engine);
     filament::MaterialInstance* materialInstance = material->createInstance();
 
+    auto l = vertices[vertices.size() - 1];
+
     filament::VertexBuffer* vertexBuffer = filament::VertexBuffer::Builder()
             .vertexCount(vertices.size())
             .bufferCount(1)
@@ -238,7 +242,7 @@ int main()
     filament::RenderableManager::Builder(1)
             .boundingBox({{ -1, -1, -1 }, { 1, 1, 1 }})
             .material(0, materialInstance)
-            .geometry(0, filament::RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer, indexBuffer, 0, 1500)
+            .geometry(0, filament::RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer, indexBuffer, 0, indices.size())
             .culling(false)
             .receiveShadows(false)
             .castShadows(false)
@@ -247,7 +251,8 @@ int main()
             .build(*engine, renderable);
     scene->addEntity(renderable);
     auto& tcm = engine->getTransformManager();
-    tcm.setTransform(tcm.getInstance(renderable), filament::math::mat4f::translation(filament::math::float3{ 0, -1, 0 }));
+//    tcm.setTransform(tcm.getInstance(renderable), filament::math::mat4f::rotation(180.0f * HMM_DegToRad, filament::math::float3{ 0, 1, 0 }));
+    tcm.setTransform(tcm.getInstance(renderable), filament::math::mat4f::translation(filament::math::float3{ 0, -1, -1 }));
 
     view->setCamera(camera);
     view->setScene(scene);

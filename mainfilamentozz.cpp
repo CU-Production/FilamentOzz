@@ -250,10 +250,10 @@ int main(int argc, char** argv) {
             const float jw1 = joint_weights[i * 3 + 1];
             const float jw2 = joint_weights[i * 3 + 2];
             const float jw3 = 1.0f - (jw0 + jw1 + jw2);
-            v->joint_weights[0] = jw0;
-            v->joint_weights[1] = jw1;
-            v->joint_weights[2] = jw2;
-            v->joint_weights[3] = jw3;
+            v->joint_weights[0] = std::max(jw0, 0.0f);
+            v->joint_weights[1] = std::max(jw1, 0.0f);
+            v->joint_weights[2] = std::max(jw2, 0.0f);
+            v->joint_weights[3] = std::max(jw3, 0.0f);
         }
 
         indices.resize(num_triangle_indices);
@@ -300,7 +300,7 @@ int main(int argc, char** argv) {
         RenderableManager::Builder(1)
                 .boundingBox({{ -1, -1, -1 }, { 1, 1, 1 }})
                 .material(0, app.mat->getDefaultInstance())
-                .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, app.vb, app.ib, 0, 1500)
+                .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, app.vb, app.ib, 0, indices.size())
                 .culling(false)
                 .receiveShadows(false)
                 .castShadows(false)
@@ -310,7 +310,7 @@ int main(int argc, char** argv) {
 
         scene->addEntity(app.renderable);
         auto& tcm = engine->getTransformManager();
-        tcm.setTransform(tcm.getInstance(app.renderable), filament::math::mat4f::translation(filament::math::float3{ 0, -1, 0 }));
+        tcm.setTransform(tcm.getInstance(app.renderable), filament::math::mat4f::translation(filament::math::float3{ 0, -1, -1 }));
 
         app.camera = utils::EntityManager::get().create();
         app.cam = engine->createCamera(app.camera);
