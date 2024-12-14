@@ -1,26 +1,26 @@
 #define _ITERATOR_DEBUG_LEVEL 0
-
-#include "GLFW/glfw3.h"
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include "GLFW/glfw3native.h"
-
 #include <filament/Camera.h>
 #include <filament/Engine.h>
 #include <filament/IndexBuffer.h>
 #include <filament/Material.h>
-#include <filament/MaterialInstance.h>
 #include <filament/RenderableManager.h>
 #include <filament/Scene.h>
 #include <filament/Skybox.h>
 #include <filament/TransformManager.h>
 #include <filament/VertexBuffer.h>
-#include <filament/IndexBuffer.h>
 #include <filament/SkinningBuffer.h>
 #include <filament/View.h>
-#include <filament/Viewport.h>
-#include <filament/Renderer.h>
 
 #include <utils/EntityManager.h>
+#include <utils/Path.h>
+
+#include <filamentapp/Config.h>
+#include <filamentapp/FilamentApp.h>
+
+#include <cmath>
+#include <iostream>
+
+#include <getopt/getopt.h>
 
 // ozz-animation headers
 #include "ozz/animation/runtime/animation.h"
@@ -36,16 +36,30 @@
 
 #include "HandmadeMath.h"
 
-/**
- * matc -o bakedColor.filament -a all bakedColor.mat
- * bin2header.exe -o bakedColor.filament.h bakedColor.filament
- */
 #include "bakedColor.filament.h"
 
-#define SCREEN_WIDTH  800
-#define SCREEN_HEIGHT 600
+using namespace filament;
+using utils::Entity;
+using utils::EntityManager;
+using utils::Path;
+using namespace filament::math;
 
-#pragma optimize("", off)
+struct App {
+    VertexBuffer* vb;
+    IndexBuffer* ib;
+    Material* mat;
+    Camera* cam;
+    Entity camera;
+    Skybox* skybox;
+    Entity renderable;
+};
+
+struct VertexWithBones {
+    float3 position;
+    float3 normal;
+    filament::math::ushort4 joint_indices;
+    float4 joint_weights;
+};
 
 static std::vector<filament::math::mat4f> convert_ozzMat4_to_filaMat4(const std::vector<ozz::math::Float4x4>& inOzzMat4V)
 {
@@ -54,14 +68,72 @@ static std::vector<filament::math::mat4f> convert_ozzMat4_to_filaMat4(const std:
 
     memcpy(outFMat4V.data(), inOzzMat4V.data(), sizeof(float) * 16 * inOzzMat4V.size());
 
+//    for (int i = 0; i < outFMat4V.size(); ++i)
+//    {
+//        outFMat4V[i] = filament::math::mat4f(1.0f);
+//    }
+
     return outFMat4V;
 }
 
-int main()
-{
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "GLFW + Filament + ozz", nullptr, nullptr);
+static void printUsage(char* name) {
+    std::string exec_name(Path(name).getName());
+    std::string usage(
+            "SAMPLE is a command-line tool for testing Filament skinning.\n"
+            "Usage:\n"
+            "    SAMPLE [options]\n"
+            "Options:\n"
+            "   --help, -h\n"
+            "       Prints this message\n\n"
+            "   --api, -a\n"
+            "       Specify the backend API: opengl (default), vulkan, or metal\n\n"
+    );
+    const std::string from("SAMPLE");
+    for (size_t pos = usage.find(from); pos != std::string::npos; pos = usage.find(from, pos)) {
+        usage.replace(pos, from.length(), exec_name);
+    }
+    std::cout << usage;
+}
+
+static int handleCommandLineArgments(int argc, char* argv[], Config* config) {
+    static constexpr const char* OPTSTR = "ha:";
+    static const struct option OPTIONS[] = {
+            { "help",         no_argument,       nullptr, 'h' },
+            { "api",          required_argument, nullptr, 'a' },
+            { nullptr, 0, nullptr, 0 }  // termination of the option list
+    };
+    int opt;
+    int option_index = 0;
+    while ((opt = getopt_long(argc, argv, OPTSTR, OPTIONS, &option_index)) >= 0) {
+        std::string arg(optarg != nullptr ? optarg : "");
+        switch (opt) {
+            default:
+            case 'h':
+                printUsage(argv[0]);
+                exit(0);
+            case 'a':
+                if (arg == "opengl") {
+                    config->backend = Engine::Backend::OPENGL;
+                } else if (arg == "vulkan") {
+                    config->backend = Engine::Backend::VULKAN;
+                } else if (arg == "metal") {
+                    config->backend = Engine::Backend::METAL;
+                } else {
+                    std::cerr << "Unrecognized backend. Must be 'opengl'|'vulkan'|'metal'."
+                              << std::endl;
+                }
+                break;
+        }
+    }
+
+    return optind;
+}
+
+int main(int argc, char** argv) {
+    Config config;
+    config.title = "hello skinning";
+
+    handleCommandLineArgments(argc, argv, &config);
 
     // ozz init & vb/ib init
 #pragma region ozz init
@@ -79,19 +151,19 @@ int main()
         std::vector<filament::math::mat4f> joint_matrices_fmath;
     };
 
-    struct Vertex
-    {
-        HMM_Vec3 position;
-        HMM_Vec3 normal;
-        uint16_t joint_indices[4];
-        HMM_Vec4 joint_weights;
-    };
+//    struct Vertex
+//    {
+//        HMM_Vec3 position;
+//        HMM_Vec3 normal;
+//        uint16_t joint_indices[4];
+//        HMM_Vec4 joint_weights;
+//    };
 
     ozz_t ozz{};
     int num_skeleton_joints = -1;
     int num_skin_joints = -1;
     int num_triangle_indices = -1;
-    std::vector<Vertex> vertices;
+    std::vector<VertexWithBones> vertices;
     std::vector<uint32_t> indices;
 
     ozz::io::File skel_file("data/ozz_skin_skeleton.ozz", "rb");
@@ -163,7 +235,7 @@ int main()
         const float* joint_weights = &meshes[0].parts[0].joint_weights[0];
         vertices.resize(num_vertices);
         for (int i = 0; i < (int)num_vertices; i++) {
-            Vertex* v = &vertices[i];
+            VertexWithBones* v = &vertices[i];
             v->position[0] = positions[i * 3 + 0];
             v->position[1] = positions[i * 3 + 1];
             v->position[2] = positions[i * 3 + 2];
@@ -195,87 +267,77 @@ int main()
 
 #pragma endregion ozz init
 
-    filament::Engine* engine = filament::Engine::create(filament::Engine::Backend::VULKAN);
-    filament::SwapChain* swapChain = engine->createSwapChain(glfwGetWin32Window(window));
-    filament::Renderer* renderer = engine->createRenderer();
+    App app;
+    auto setup = [&app, &vertices, &indices, &ozz](Engine* engine, View* view, Scene* scene) {
+        app.skybox = Skybox::Builder().color({0.1, 0.125, 0.25, 1.0}).build(*engine);
 
-    filament::Camera* camera = engine->createCamera(utils::EntityManager::get().create());
+        scene->setSkybox(app.skybox);
+        view->setPostProcessingEnabled(false);
+        static_assert(sizeof(VertexWithBones) == 48, "Strange vertex size.");
+        app.vb = VertexBuffer::Builder()
+                .vertexCount(vertices.size())
+                .bufferCount(1)
+                .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT3, 0, 48)
+                .attribute(VertexAttribute::COLOR, 0, VertexBuffer::AttributeType::FLOAT3, 12, 48)
+//                .normalized(VertexAttribute::COLOR)
+                .attribute(VertexAttribute::BONE_INDICES, 0, VertexBuffer::AttributeType::USHORT4, 24, 48)
+                .attribute(VertexAttribute::BONE_WEIGHTS, 0, VertexBuffer::AttributeType::FLOAT4, 32, 48)
+                .build(*engine);
+        app.vb->setBufferAt(*engine, 0,
+                            VertexBuffer::BufferDescriptor(vertices.data(), sizeof(VertexWithBones)*vertices.size(), nullptr));
+        app.ib = IndexBuffer::Builder()
+                .indexCount(indices.size())
+                .bufferType(IndexBuffer::IndexType::UINT)
+                .build(*engine);
+        app.ib->setBuffer(*engine,
+                          IndexBuffer::BufferDescriptor(indices.data(), sizeof(uint32_t)*indices.size(), nullptr));
+        app.mat = Material::Builder()
+                .package(bakedColor_filament, sizeof(bakedColor_filament))
+                .build(*engine);
 
-    filament::View* view = engine->createView();
-    view->setName("view0");
-    view->setViewport({ 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT });
-    view->setPostProcessingEnabled(false);
+        app.renderable = EntityManager::get().create();
 
-    filament::Scene* scene = engine->createScene();
+        RenderableManager::Builder(1)
+                .boundingBox({{ -1, -1, -1 }, { 1, 1, 1 }})
+                .material(0, app.mat->getDefaultInstance())
+                .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, app.vb, app.ib, 0, 1500)
+                .culling(false)
+                .receiveShadows(false)
+                .castShadows(false)
+                .skinning(ozz.joint_matrices_fmath.size())
+                .enableSkinningBuffers(false)
+                .build(*engine, app.renderable);
 
-    filament::Skybox* skybox = filament::Skybox::Builder().color({0.1, 0.125, 0.25, 1.0}).build(*engine);
-    scene->setSkybox(skybox);
+        scene->addEntity(app.renderable);
+        auto& tcm = engine->getTransformManager();
+        tcm.setTransform(tcm.getInstance(app.renderable), filament::math::mat4f::translation(filament::math::float3{ 0, -1, 0 }));
 
-    filament::Material* material = filament::Material::Builder()
-            .package((void*) bakedColor_filament, sizeof(bakedColor_filament))
-            .build(*engine);
-    filament::MaterialInstance* materialInstance = material->createInstance();
+        app.camera = utils::EntityManager::get().create();
+        app.cam = engine->createCamera(app.camera);
+        view->setCamera(app.cam);
+    };
 
-    filament::VertexBuffer* vertexBuffer = filament::VertexBuffer::Builder()
-            .vertexCount(vertices.size())
-            .bufferCount(1)
-            .attribute(filament::VertexAttribute::POSITION,     0, filament::VertexBuffer::AttributeType::FLOAT3, 0,  48)
-            .attribute(filament::VertexAttribute::COLOR,        0, filament::VertexBuffer::AttributeType::FLOAT3, 12, 48)
-//            .normalized(filament::VertexAttribute::COLOR)
-            .attribute(filament::VertexAttribute::BONE_INDICES, 0, filament::VertexBuffer::AttributeType::USHORT4, 24, 48)
-            .attribute(filament::VertexAttribute::BONE_WEIGHTS, 0, filament::VertexBuffer::AttributeType::FLOAT4,  32, 48)
-            .build(*engine);
-    vertexBuffer->setBufferAt(*engine, 0, filament::VertexBuffer::BufferDescriptor(vertices.data(), sizeof(Vertex)*vertices.size(), nullptr));
+    auto cleanup = [&app](Engine* engine, View*, Scene*) {
+        engine->destroy(app.skybox);
+        engine->destroy(app.renderable);
+        engine->destroy(app.mat);
+        engine->destroy(app.vb);
+        engine->destroy(app.ib);
+        engine->destroyCameraComponent(app.camera);
+        utils::EntityManager::get().destroy(app.camera);
+    };
 
-    filament::IndexBuffer* indexBuffer = filament::IndexBuffer::Builder()
-            .indexCount(indices.size())
-            .bufferType(filament::IndexBuffer::IndexType::UINT)
-            .build(*engine);
-    indexBuffer->setBuffer(*engine, filament::IndexBuffer::BufferDescriptor(indices.data(), sizeof(uint32_t)*indices.size(), nullptr));
-
-    utils::Entity renderable = utils::EntityManager::get().create();
-    // build a triangle
-    filament::RenderableManager::Builder(1)
-            .boundingBox({{ -1, -1, -1 }, { 1, 1, 1 }})
-            .material(0, materialInstance)
-            .geometry(0, filament::RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer, indexBuffer, 0, 1500)
-            .culling(false)
-            .receiveShadows(false)
-            .castShadows(false)
-//            .enableSkinningBuffers(false)
-            .skinning(ozz.joint_matrices_fmath.size())
-            .build(*engine, renderable);
-    scene->addEntity(renderable);
-    auto& tcm = engine->getTransformManager();
-    tcm.setTransform(tcm.getInstance(renderable), filament::math::mat4f::translation(filament::math::float3{ 0, -1, 0 }));
-
-    view->setCamera(camera);
-    view->setScene(scene);
-
-    static double startTime = glfwGetTime();
-    while (!glfwWindowShouldClose(window))
-    {
-        glfwPollEvents();
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        {
-            glfwSetWindowShouldClose(window, true);
-        }
-
-        // camera
-        {
-            constexpr float ZOOM = 1.5f;
-            const uint32_t w = view->getViewport().width;
-            const uint32_t h = view->getViewport().height;
-            const float aspect = (float) w / h;
-            camera->setProjection(filament::Camera::Projection::ORTHO,
-                                   -aspect * ZOOM, aspect * ZOOM,
-                                   -ZOOM, ZOOM, 0, 1);
-        }
+    FilamentApp::get().animate([&app, &ozz](Engine* engine, View* view, double now) {
+        constexpr float ZOOM = 1.5f;
+        const uint32_t w = view->getViewport().width;
+        const uint32_t h = view->getViewport().height;
+        const float aspect = (float) w / h;
+        app.cam->setProjection(Camera::Projection::ORTHO,
+                               -aspect * ZOOM, aspect * ZOOM,
+                               -ZOOM, ZOOM, 0, 1);
 
         // ozz update
         {
-            float now = glfwGetTime() - startTime;
-
             // convert current time to animation ration (0.0 .. 1.0)
             const float anim_duration = ozz.animation.duration();
             float anim_ratio = fmodf((float)now / anim_duration, 1.0f);
@@ -296,39 +358,21 @@ int main()
             ltm_job.Run();
 
             // compute skinning matrices and write to joint texture upload buffer
-            for (int i = 0; i < num_skin_joints; i++) {
+            for (int i = 0; i < ozz.joint_matrices.size(); i++) {
                 ozz.joint_matrices[i] = ozz.model_matrices[ozz.joint_remaps[i]] * ozz.mesh_inverse_bindposes[i];
             }
 
             ozz.joint_matrices_fmath = convert_ozzMat4_to_filaMat4(ozz.joint_matrices);
-
-            auto& rm = engine->getRenderableManager();
-            rm.setBones(rm.getInstance(renderable), ozz.joint_matrices_fmath.data(), ozz.joint_matrices_fmath.size(), 0);
         }
 
-        // beginFrame() returns false if we need to skip a frame
-        if (renderer->beginFrame(swapChain)) {
-            // for each View
-            renderer->render(view);
-            renderer->endFrame();
-        }
+        auto& rm = engine->getRenderableManager();
 
-    }
+        // Bone skinning animation
+        rm.setBones(rm.getInstance(app.renderable), ozz.joint_matrices_fmath.data(), ozz.joint_matrices_fmath.size(), 0);
 
-    engine->destroy(skybox);
-    engine->destroy(renderable);
-    engine->destroy(materialInstance);
-    engine->destroy(material);
-//    engine->destroy(skinningBuffer);
-    engine->destroy(vertexBuffer);
-    engine->destroy(indexBuffer);
-    engine->destroy(swapChain);
-    engine->destroy(renderer);
-//    engine->destroyCameraComponent(camera);
-//    utils::EntityManager::get().destroy(camera);
-    engine->destroy(view);
-    filament::Engine::destroy(engine);
+    });
 
-    glfwTerminate();
-    return EXIT_SUCCESS;
+    FilamentApp::get().run(config, setup, cleanup);
+
+    return 0;
 }

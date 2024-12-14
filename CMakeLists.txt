@@ -10,8 +10,18 @@ target_link_libraries(FilamentGlfw PRIVATE glfw backend bluegl opengl32 bluevk f
 
 add_executable(FilamentOzz mainglfwfilamentozz.cpp)
 target_link_libraries(FilamentOzz PRIVATE glfw backend bluegl opengl32 bluevk filabridge filaflat filamat filament backend ibl utils geometry smol-v OzzAnim)
+set_property(TARGET FilamentOzz PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_custom_command(
         TARGET FilamentOzz POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_CURRENT_BINARY_DIR}/data/"
+        VERBATIM
+)
+
+add_executable(FilamentAppOzz mainfilamentozz.cpp)
+target_link_libraries(FilamentAppOzz PRIVATE glfw backend bluegl opengl32 bluevk filabridge filaflat filamat filament backend ibl utils geometry smol-v filamentapp OzzAnim)
+set_property(TARGET FilamentAppOzz PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_custom_command(
+        TARGET FilamentAppOzz POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_CURRENT_BINARY_DIR}/data/"
         VERBATIM
 )
