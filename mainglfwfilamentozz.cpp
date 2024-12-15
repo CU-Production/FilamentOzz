@@ -201,7 +201,8 @@ int main()
     filament::SwapChain* swapChain = engine->createSwapChain(glfwGetWin32Window(window));
     filament::Renderer* renderer = engine->createRenderer();
 
-    filament::Camera* camera = engine->createCamera(utils::EntityManager::get().create());
+    utils::Entity cameraComponent = utils::EntityManager::get().create();
+    filament::Camera* camera = engine->createCamera(cameraComponent);
 
     filament::View* view = engine->createView();
     view->setName("view0");
@@ -320,6 +321,7 @@ int main()
 
     }
 
+    engine->destroy(scene);
     engine->destroy(skybox);
     engine->destroy(renderable);
     engine->destroy(materialInstance);
@@ -329,8 +331,8 @@ int main()
     engine->destroy(indexBuffer);
     engine->destroy(swapChain);
     engine->destroy(renderer);
-//    engine->destroyCameraComponent(camera);
-//    utils::EntityManager::get().destroy(camera);
+    engine->destroyCameraComponent(cameraComponent);
+    utils::EntityManager::get().destroy(cameraComponent);
     engine->destroy(view);
     filament::Engine::destroy(engine);
 
