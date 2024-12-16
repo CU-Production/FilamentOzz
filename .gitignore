@@ -89,3 +89,7 @@ cmake-build-*
 # VS code
 .vscode
 *.code-workspace
+
+# filament assets
+
+!/3rd_party/filament/assets/*.obj
