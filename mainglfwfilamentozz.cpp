@@ -22,6 +22,8 @@
 
 #include <utils/EntityManager.h>
 
+#include <filagui/ImGuiHelper.h>
+
 // ozz-animation headers
 #include "ozz/animation/runtime/animation.h"
 #include "ozz/animation/runtime/skeleton.h"
@@ -44,10 +46,16 @@
  */
 #include "bakedColor.filament.h"
 
+#define YAP_ENABLE
+#define YAP_IMPL
+#define YAP_IMGUI
+#include "imgui.h"
+#include "YAP.h"
+
+#include "imgui_impl_glfw.h"
+
 #define SCREEN_WIDTH  800
 #define SCREEN_HEIGHT 600
-
-#pragma optimize("", off)
 
 static std::vector<filament::math::mat4f> convert_ozzMat4_to_filaMat4(const std::vector<ozz::math::Float4x4>& inOzzMat4V)
 {
@@ -61,6 +69,10 @@ static std::vector<filament::math::mat4f> convert_ozzMat4_to_filaMat4(const std:
 
 int main()
 {
+    YAP::Init(2, 4, 2048, 16);// , malloc, free);
+    YAP::PushPhase(LoadingPhase);
+    YAP::PushSection(Loading);
+
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "GLFW + Filament + ozz", nullptr, nullptr);
@@ -258,7 +270,24 @@ int main()
     view->setCamera(camera);
     view->setScene(scene);
 
+    // imgui
+    filament::View* ui_view = engine->createView();
+    ui_view->setName("ui_view0");
+    ui_view->setViewport({ 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT });
+    ui_view->setPostProcessingEnabled(false);
+    filagui::ImGuiHelper* im_gui_helper = new filagui::ImGuiHelper{engine, ui_view, ""};
+    const auto size = ui_view->getViewport();
+    im_gui_helper->setDisplaySize(size.width, size.height, 1, 1);
+    ImGui_ImplGlfw_InitForOther(window, true);
+
+
+    YAP::PopSection();
+    YAP::PopPhase(); // LoadingPhase
+
+    YAP::PushPhase(GamePhase);
+
     static double startTime = glfwGetTime();
+    bool enableYAP = true;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -266,61 +295,98 @@ int main()
         {
             glfwSetWindowShouldClose(window, true);
         }
-
-        // camera
-        {
-            constexpr float ZOOM = 1.5f;
-            const uint32_t w = view->getViewport().width;
-            const uint32_t h = view->getViewport().height;
-            const float aspect = (float) w / h;
-            camera->setProjection(filament::Camera::Projection::ORTHO,
-                                   -aspect * ZOOM, aspect * ZOOM,
-                                   -ZOOM, ZOOM, 0, 1);
-        }
-
-        // ozz update
-        {
-            float now = glfwGetTime() - startTime;
-
-            // convert current time to animation ration (0.0 .. 1.0)
-            const float anim_duration = ozz.animation.duration();
-            float anim_ratio = fmodf((float)now / anim_duration, 1.0f);
-
-            // sample animation
-            ozz::animation::SamplingJob sampling_job;
-            sampling_job.animation = &ozz.animation;
-            sampling_job.cache = &ozz.cache;
-            sampling_job.ratio = anim_ratio;
-            sampling_job.output = make_span(ozz.local_matrices);
-            sampling_job.Run();
-
-            // convert joint matrices from local to model space
-            ozz::animation::LocalToModelJob ltm_job;
-            ltm_job.skeleton = &ozz.skeleton;
-            ltm_job.input = make_span(ozz.local_matrices);
-            ltm_job.output = make_span(ozz.model_matrices);
-            ltm_job.Run();
-
-            // compute skinning matrices and write to joint texture upload buffer
-            for (int i = 0; i < num_skin_joints; i++) {
-                ozz.joint_matrices[i] = ozz.model_matrices[ozz.joint_remaps[i]] * ozz.mesh_inverse_bindposes[i];
-            }
-
-            ozz.joint_matrices_fmath = convert_ozzMat4_to_filaMat4(ozz.joint_matrices);
-
-            auto& rm = engine->getRenderableManager();
-            rm.setBones(rm.getInstance(renderable), ozz.joint_matrices_fmath.data(), ozz.joint_matrices_fmath.size(), 0);
-        }
+        float now = glfwGetTime() - startTime;
+        ImGui_ImplGlfw_NewFrame();
 
         // beginFrame() returns false if we need to skip a frame
         if (renderer->beginFrame(swapChain)) {
-            // for each View
-            renderer->render(view);
-            renderer->endFrame();
-        }
+            YAP::NewFrame();
+            YAP::PushSection(Frame);
 
+            // camera
+            {
+                YAP::PushSection(CameraUpdate, 0XFF000099);
+                constexpr float ZOOM = 1.5f;
+                const uint32_t w = view->getViewport().width;
+                const uint32_t h = view->getViewport().height;
+                const float aspect = (float) w / h;
+                camera->setProjection(filament::Camera::Projection::ORTHO,
+                                       -aspect * ZOOM, aspect * ZOOM,
+                                       -ZOOM, ZOOM, 0, 1);
+                YAP::PopSection();
+            }
+
+            // ozz update
+            {
+                YAP::PushSection(OzzUpdate, 0XFF009900);
+                // convert current time to animation ration (0.0 .. 1.0)
+                const float anim_duration = ozz.animation.duration();
+                float anim_ratio = fmodf((float)now / anim_duration, 1.0f);
+
+                // sample animation
+                YAP::PushSection(SamplingJob, 0XFF999900);
+                ozz::animation::SamplingJob sampling_job;
+                sampling_job.animation = &ozz.animation;
+                sampling_job.cache = &ozz.cache;
+                sampling_job.ratio = anim_ratio;
+                sampling_job.output = make_span(ozz.local_matrices);
+                sampling_job.Run();
+                YAP::PopSection(); // SamplingJob
+
+                // convert joint matrices from local to model space
+                YAP::PushSection(LocalToModelJob, 0XFF009999);
+                ozz::animation::LocalToModelJob ltm_job;
+                ltm_job.skeleton = &ozz.skeleton;
+                ltm_job.input = make_span(ozz.local_matrices);
+                ltm_job.output = make_span(ozz.model_matrices);
+                ltm_job.Run();
+                YAP::PopSection(); // LocalToModelJob
+
+                // compute skinning matrices and write to joint texture upload buffer
+                YAP::PushSection(ComputeSkinningMat, 0XFF990099);
+                for (int i = 0; i < num_skin_joints; i++) {
+                    ozz.joint_matrices[i] = ozz.model_matrices[ozz.joint_remaps[i]] * ozz.mesh_inverse_bindposes[i];
+                }
+
+                ozz.joint_matrices_fmath = convert_ozzMat4_to_filaMat4(ozz.joint_matrices);
+
+                auto& rm = engine->getRenderableManager();
+                rm.setBones(rm.getInstance(renderable), ozz.joint_matrices_fmath.data(), ozz.joint_matrices_fmath.size(), 0);
+                YAP::PopSection(); // ComputeSkinningMat
+
+                YAP::PopSection(); // OzzUpdate
+            }
+
+            // for each View
+            YAP::PushSection(ImguiUpdate, 0XFF567800);
+            im_gui_helper->render(now, [&enableYAP](filament::Engine* engine, filament::View* view) {
+                // ImGui::ShowDemoWindow();
+                YAP::PushSection(YapUpdate, 0XFF654321);
+                YAP::ImGuiLogger(&enableYAP);
+                YAP::PopSection(); // YapUpdate
+            });
+            YAP::PopSection(); // ImguiUpdate
+
+            YAP::PopSection(); // Frame
+
+            // YAP::PushSection(CmdbufferUpdate, 0XFF009876);
+            renderer->render(view);
+            renderer->render(ui_view);
+            // YAP::PopSection(); // CmdbufferUpdate, 0XFF567800);
+
+            // YAP::PushSection(Present, 0XFF123456);
+            renderer->endFrame();
+            // YAP::PopSection(); // Present, 0XFF567800);
+
+        }
     }
 
+    YAP::PopPhase(); // GamePhase
+    YAP::LogDump(printf);
+    YAP::Finish();
+
+    ImGui_ImplGlfw_Shutdown();
+    delete im_gui_helper;
     engine->destroy(scene);
     engine->destroy(skybox);
     engine->destroy(renderable);
@@ -334,6 +400,7 @@ int main()
     engine->destroyCameraComponent(cameraComponent);
     utils::EntityManager::get().destroy(cameraComponent);
     engine->destroy(view);
+    engine->destroy(ui_view);
     filament::Engine::destroy(engine);
 
     glfwTerminate();

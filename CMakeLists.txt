@@ -8,8 +8,8 @@ add_subdirectory(3rd_party)
 add_executable(FilamentGlfw mainglfwfilament.cpp)
 target_link_libraries(FilamentGlfw PRIVATE glfw backend bluegl opengl32 bluevk filabridge filaflat filamat filament backend ibl utils geometry smol-v)
 
-add_executable(FilamentOzz mainglfwfilamentozz.cpp)
-target_link_libraries(FilamentOzz PRIVATE glfw backend bluegl opengl32 bluevk filabridge filaflat filamat filament backend ibl utils geometry smol-v OzzAnim)
+add_executable(FilamentOzz mainglfwfilamentozz.cpp imgui_impl_glfw.cpp)
+target_link_libraries(FilamentOzz PRIVATE glfw backend bluegl opengl32 bluevk filabridge filaflat filamat filagui filament backend ibl utils geometry smol-v OzzAnim)
 set_property(TARGET FilamentOzz PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_custom_command(
         TARGET FilamentOzz POST_BUILD
