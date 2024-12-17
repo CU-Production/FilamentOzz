@@ -38,6 +38,12 @@
 
 #include "bakedColor.filament.h"
 
+#define YAP_ENABLE
+#define YAP_IMPL
+#define YAP_IMGUI
+#include "imgui.h"
+#include "YAP.h"
+
 using namespace filament;
 using utils::Entity;
 using utils::EntityManager;
@@ -52,6 +58,8 @@ struct App {
     Entity camera;
     Skybox* skybox;
     Entity renderable;
+
+    filagui::ImGuiHelper* imGuiHelper;
 };
 
 struct VertexWithBones {
@@ -250,10 +258,10 @@ int main(int argc, char** argv) {
             const float jw1 = joint_weights[i * 3 + 1];
             const float jw2 = joint_weights[i * 3 + 2];
             const float jw3 = 1.0f - (jw0 + jw1 + jw2);
-            v->joint_weights[0] = std::max(jw0, 0.0f);
-            v->joint_weights[1] = std::max(jw1, 0.0f);
-            v->joint_weights[2] = std::max(jw2, 0.0f);
-            v->joint_weights[3] = std::max(jw3, 0.0f);
+            v->joint_weights[0] = max(jw0, 0.0f);
+            v->joint_weights[1] = max(jw1, 0.0f);
+            v->joint_weights[2] = max(jw2, 0.0f);
+            v->joint_weights[3] = max(jw3, 0.0f);
         }
 
         indices.resize(num_triangle_indices);
@@ -269,6 +277,10 @@ int main(int argc, char** argv) {
 
     App app;
     auto setup = [&app, &vertices, &indices, &ozz](Engine* engine, View* view, Scene* scene) {
+        YAP::Init(2, 4, 2048, 16);// , malloc, free);
+
+        YAP::PushPhase(GameInitPhase);
+
         app.skybox = Skybox::Builder().color({0.1, 0.125, 0.25, 1.0}).build(*engine);
 
         scene->setSkybox(app.skybox);
@@ -315,9 +327,25 @@ int main(int argc, char** argv) {
         app.camera = utils::EntityManager::get().create();
         app.cam = engine->createCamera(app.camera);
         view->setCamera(app.cam);
+
+        // app.imGuiHelper = new filagui::ImGuiHelper(engine, view, "");
+        // const auto size = view->getViewport();
+        // app.imGuiHelper->setDisplaySize(size.width, size.height, 1, 1);
+
+        YAP::PopPhase(); // GameInitPhase
+
+        YAP::PushPhase(GamePhase);
+        //YAP::PushSection(MainSection);
+
     };
 
     auto cleanup = [&app](Engine* engine, View*, Scene*) {
+        //YAP::PopSection(); // MainSection
+        YAP::PopPhase(); // GamePhase
+        YAP::LogDump(printf);
+        YAP::Finish();
+        // delete app.imGuiHelper;
+
         engine->destroy(app.skybox);
         engine->destroy(app.renderable);
         engine->destroy(app.mat);
@@ -327,7 +355,18 @@ int main(int argc, char** argv) {
         utils::EntityManager::get().destroy(app.camera);
     };
 
+    bool enableYAP = true;
+    auto imgui_callback = [&app, &enableYAP](Engine *engine, View *view) {
+        // ImGui::ShowDemoWindow();
+
+        YAP::ImGuiLogger(&enableYAP);
+    };
+
     FilamentApp::get().animate([&app, &ozz](Engine* engine, View* view, double now) {
+        YAP::NewFrame();
+        YAP::PushSection(Frame);
+
+        YAP::PushSection(CameraUpdate, 0XFF000099);
         constexpr float ZOOM = 1.5f;
         const uint32_t w = view->getViewport().width;
         const uint32_t h = view->getViewport().height;
@@ -335,44 +374,64 @@ int main(int argc, char** argv) {
         app.cam->setProjection(Camera::Projection::ORTHO,
                                -aspect * ZOOM, aspect * ZOOM,
                                -ZOOM, ZOOM, 0, 1);
+        YAP::PopSection();
 
         // ozz update
         {
+            YAP::PushSection(OzzUpdate, 0XFF009900);
+
             // convert current time to animation ration (0.0 .. 1.0)
             const float anim_duration = ozz.animation.duration();
             float anim_ratio = fmodf((float)now / anim_duration, 1.0f);
 
             // sample animation
+            YAP::PushSection(SamplingJob, 0XFF999900);
             ozz::animation::SamplingJob sampling_job;
             sampling_job.animation = &ozz.animation;
             sampling_job.cache = &ozz.cache;
             sampling_job.ratio = anim_ratio;
             sampling_job.output = make_span(ozz.local_matrices);
             sampling_job.Run();
+            YAP::PopSection(); // SamplingJob
 
             // convert joint matrices from local to model space
+            YAP::PushSection(LocalToModelJob, 0XFF009999);
             ozz::animation::LocalToModelJob ltm_job;
             ltm_job.skeleton = &ozz.skeleton;
             ltm_job.input = make_span(ozz.local_matrices);
             ltm_job.output = make_span(ozz.model_matrices);
             ltm_job.Run();
+            YAP::PopSection(); // LocalToModelJob
 
             // compute skinning matrices and write to joint texture upload buffer
+            YAP::PushSection(ComputeSkinningMat, 0XFF990099);
             for (int i = 0; i < ozz.joint_matrices.size(); i++) {
                 ozz.joint_matrices[i] = ozz.model_matrices[ozz.joint_remaps[i]] * ozz.mesh_inverse_bindposes[i];
             }
-
             ozz.joint_matrices_fmath = convert_ozzMat4_to_filaMat4(ozz.joint_matrices);
+            YAP::PopSection(); // ComputeSkinningMat
+
+            YAP::PopSection(); // OzzUpdate
         }
+
+        YAP::PushSection(SkinningBufferUpdate, 0XFF990000);
 
         auto& rm = engine->getRenderableManager();
 
         // Bone skinning animation
         rm.setBones(rm.getInstance(app.renderable), ozz.joint_matrices_fmath.data(), ozz.joint_matrices_fmath.size(), 0);
 
+        YAP::PopSection(); // SkinningBufferUpdate
+
+        // app.imGuiHelper->render(now, [&app](Engine*, View*) {
+        //     //this->updateUserInterface();
+        //         ImGui::ShowDemoWindow();
+        // });
+
+        YAP::PopSection(); // Frame
     });
 
-    FilamentApp::get().run(config, setup, cleanup);
+    FilamentApp::get().run(config, setup, cleanup, imgui_callback);
 
     return 0;
 }
