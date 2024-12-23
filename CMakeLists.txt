@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(DXtest)
 
+set(CMAKE_C_STANDARD   11)
 set(CMAKE_CXX_STANDARD 20)
 
 add_subdirectory(3rd_party)
@@ -22,6 +23,15 @@ target_link_libraries(FilamentAppOzz PRIVATE glfw backend bluegl opengl32 bluevk
 set_property(TARGET FilamentAppOzz PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_custom_command(
         TARGET FilamentAppOzz POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_CURRENT_BINARY_DIR}/data/"
+        VERBATIM
+)
+
+add_executable(FilamentRGFWOzz mainrgfwfilamentozz.cpp)
+target_link_libraries(FilamentRGFWOzz PRIVATE backend bluegl opengl32 bluevk filabridge filaflat filamat filagui filament backend ibl utils geometry smol-v OzzAnim)
+set_property(TARGET FilamentRGFWOzz PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_custom_command(
+        TARGET FilamentRGFWOzz POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_CURRENT_BINARY_DIR}/data/"
         VERBATIM
 )
