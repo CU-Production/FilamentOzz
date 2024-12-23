@@ -291,7 +291,7 @@ int main()
 
     typedef std::chrono::duration<int> seconds_type;
 
-    std::chrono::time_point<std::chrono::steady_clock, std::chrono::seconds> startTime{std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::steady_clock::now())};
+    std::chrono::time_point<std::chrono::steady_clock, std::chrono::milliseconds> startTime{std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())};
     // static double startTime = (double)(RGFW_getTimeNS() / (1e9));
     bool enableYAP = true;
     while (RGFW_window_shouldClose(window) == RGFW_FALSE)
